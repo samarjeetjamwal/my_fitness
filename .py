@@ -1,41 +1,6 @@
-import sys
+from flask import Flask, render_template, request, jsonify
 
-def get_input_with_unit(prompt, unit_options):
-    while True:
-        try:
-            print(prompt)
-            for i, opt in enumerate(unit_options, 1):
-                print(f"  {i}. {opt}")
-            choice = int(input("Choose option number: "))
-            if 1 <= choice <= len(unit_options):
-                value = float(input(f"Enter value ({unit_options[choice-1]}): "))
-                return value, choice
-            else:
-                print("Invalid choice. Try again.")
-        except ValueError:
-            print("Please enter a valid number.")
-
-def convert_to_metric(weight_val, weight_unit, height_val, height_unit):
-    # Weight: 1 = kg, 2 = lbs
-    if weight_unit == 2:
-        weight_kg = weight_val * 0.453592
-    else:
-        weight_kg = weight_val
-
-    # Height: 1 = cm, 2 = feet+inches
-    if height_unit == 1:
-        height_m = height_val / 100.0
-    else:
-        # We assume height_val is total inches if using ft/in — but better to ask separately
-        feet = int(input("Enter feet: "))
-        inches = float(input("Enter inches: "))
-        total_inches = feet * 12 + inches
-        height_m = total_inches * 0.0254
-
-    return weight_kg, height_m
-
-def calculate_bmi(weight_kg, height_m):
-    return weight_kg / (height_m ** 2)
+app = Flask(__name__)
 
 def classify_bmi(bmi):
     if bmi < 18.5:
@@ -67,7 +32,7 @@ def generate_plan(bmi_category, age):
             "- Stay hydrated (6–8 glasses of water/day).\n"
             "- Include fiber-rich foods for digestive health."
         )
-    elif bmi_category in ["Overweight", "Obese"]:
+    else:  # Overweight or Obese
         plan['Diet'] = (
             "- Reduce calorie intake moderately (500 kcal/day deficit for gradual loss).\n"
             "- Prioritize vegetables, lean proteins (fish, tofu, legumes), and whole grains.\n"
@@ -80,19 +45,19 @@ def generate_plan(bmi_category, age):
     if age < 18:
         plan['Exercise'] = (
             "- At least 60 minutes of moderate-to-vigorous physical activity daily (WHO).\n"
-            "- Include aerobic (running, cycling), muscle-strengthening (climbing, push-ups), and bone-strengthening (jumping) activities.\n"
-            "- Limit screen time to <2 hours/day of recreational use."
+            "- Include aerobic, muscle-strengthening, and bone-strengthening activities.\n"
+            "- Limit recreational screen time to <2 hours/day."
         )
     elif 18 <= age <= 64:
         if bmi_category == "Underweight":
             plan['Exercise'] = (
-                "- Focus on strength training 2–3x/week to build muscle (weights, resistance bands).\n"
+                "- Focus on strength training 2–3x/week to build muscle.\n"
                 "- Limit excessive cardio (can burn needed calories).\n"
                 "- Include light aerobic activity (walking, yoga) for heart health."
             )
         else:
             plan['Exercise'] = (
-                "- 150–300 minutes of moderate aerobic activity OR 75–150 minutes of vigorous activity weekly (WHO/CDC).\n"
+                "- 150–300 minutes of moderate aerobic activity weekly (e.g., brisk walking, cycling).\n"
                 "- Include strength training 2x/week (major muscle groups).\n"
                 "- Add daily movement: walking, stairs, standing desk.\n"
                 "- For weight loss: aim for 250+ minutes/week of moderate activity."
@@ -116,44 +81,46 @@ def generate_plan(bmi_category, age):
 
     return plan
 
-def main():
-    print("=== Personalized BMI & Wellness Planner ===")
-    print("Based on WHO, CDC, and Harvard School of Public Health Guidelines\n")
+@app.route('/')
+def index():
+    return render_template('index.html')
 
+@app.route('/calculate', methods=['POST'])
+def calculate():
     try:
-        age = int(input("Enter your age (years): "))
-        if age < 2 or age > 120:
-            print("Please enter a realistic age (2–120).")
-            sys.exit(1)
-    except ValueError:
-        print("Invalid age.")
-        sys.exit(1)
+        data = request.get_json()
+        age = int(data['age'])
+        weight_unit = data['weight_unit']
+        height_unit = data['height_unit']
 
-    weight_val, weight_unit = get_input_with_unit(
-        "Select weight unit:",
-        ["Kilograms (kg)", "Pounds (lbs)"]
-    )
+        if weight_unit == 'kg':
+            weight_kg = float(data['weight'])
+        else:  # lbs
+            weight_kg = float(data['weight']) * 0.453592
 
-    height_val, height_unit = get_input_with_unit(
-        "Select height unit:",
-        ["Centimeters (cm)", "Feet and Inches"]
-    )
+        if height_unit == 'cm':
+            height_m = float(data['height']) / 100.0
+        else:  # ft/in
+            feet = int(data['feet'])
+            inches = float(data['inches'])
+            total_inches = feet * 12 + inches
+            height_m = total_inches * 0.0254
 
-    weight_kg, height_m = convert_to_metric(weight_val, weight_unit, height_val, height_unit)
-    bmi = calculate_bmi(weight_kg, height_m)
-    category = classify_bmi(bmi)
+        bmi = round(weight_kg / (height_m ** 2), 1)
+        category = classify_bmi(bmi)
+        plan = generate_plan(category, age)
 
-    print(f"\n📊 Your BMI: {bmi:.1f} → Category: {category}\n")
+        # Format plan for HTML (convert newlines to <br>)
+        formatted_plan = {k: v.replace('\n', '<br>') for k, v in plan.items()}
 
-    plan = generate_plan(category, age)
+        return jsonify({
+            'success': True,
+            'bmi': bmi,
+            'category': category,
+            'plan': formatted_plan
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': 'Invalid input. Please check your entries.'}), 400
 
-    print("📋 Your Personalized Plan:\n")
-    for section, advice in plan.items():
-        print(f"🔹 {section}:")
-        print(advice)
-        print()
-
-    print("ℹ️ Note: This is general advice. For personalized medical guidance, consult a healthcare professional.")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app.run(debug=True)
